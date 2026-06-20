@@ -96,8 +96,11 @@ Deliverable: the chat UI in `web/` rendering both personas side by side.
         load via `session_options.externalData`; CPU sanity-gen still in character
   - [x] Added in-page diagnostics + controls (WebGPU/adapter info, load log,
         tok/s, temp/top_p/max-tokens, Stop, Reset, raw-output toggle)
-  - [~] Load/run in a real WebGPU browser *(driving it via Playwright + lavapipe;
-        shard load fix in test)*
+  - [x] **Loads + creates a WebGPU session in a real browser** (verified via
+        Playwright on a software adapter: `model ready in 1268 s`, no alloc error)
+  - [~] First inference: on a *software* adapter the 1.23 GB fp16 embedding needs a
+        single GPU buffer > its 1.07 GB `maxBufferSize` -> fails. Per-device; real
+        GPUs usually allow >=2 GB. Robust fix = int8 embedding (0.61 GB buffer).
 - [~] Phase 3 -- tag-split chat UI
   - [x] Two-bubble UI + robot faces scaffolded (`web/`, `img/bot-{happy,sad}.png`)
   - [ ] Verified end-to-end in-browser against real model output
@@ -346,6 +349,25 @@ separate walls, in the order we hit them:
   (`/usr/share/vulkan/icd.d/lvp_icd.json`). That yields a real software adapter
   (`requestAdapter()`/`requestDevice()` both succeed) so Playwright can load the
   model and generate end-to-end -- slow, but it actually runs.
+- **There's a *second*, per-tensor GPU limit at inference time: `maxBufferSize`.**
+  After the model loaded and the WebGPU session was created (verified end-to-end
+  via Playwright -- `model ready in 1268 s`, no allocation error), the *first*
+  `generate()` threw:
+  ```
+  WebGPU validation error: Buffer size (1229193216) exceeds the max buffer size
+  limit (1073741824). While calling [Device].CreateBuffer
+  ```
+  `1229193216` is exactly the **1.23 GB fp16 embedding**: ORT's WebGPU backend
+  uploads each weight tensor as a *single* GPU buffer, and the embedding exceeded
+  the software adapter's **1.07 GB `maxBufferSize`**. (A follow-on "Missing inputs:
+  attention_mask, position_ids" is just the cascade from the lost device.) Two
+  separate limits bite at two separate times: V8's 2 GB **ArrayBuffer** cap at
+  *load* (fixed by sharding the file), and WebGPU's per-buffer `maxBufferSize` at
+  *first run* (a property of the *single largest tensor*, not the file). This one
+  is **per-device** -- many real desktop GPUs report `maxBufferSize` >= 2 GB and
+  sail through; software/low-end adapters cap lower. Robust fix: quantize the
+  embedding to int8 so its buffer is ~0.61 GB (under even the 1 GB-class limits).
+  The Diagnostics panel now surfaces `maxBufferSize` so you can predict this.
 - **Diagnose in the page, not just the console.** `web/` now has a **Diagnostics**
   panel (WebGPU support, adapter vendor/arch, `maxBufferSize`, secure-context,
   per-file load progress, tok/s, full error text) plus controls (temperature,
