@@ -79,7 +79,7 @@ Deliverable: the chat UI in `web/` rendering both personas side by side.
 ## Status
 
 - [x] Dataset prepared (`mervin_mervis_finetune.csv`)
-- [ ] Phase 1 -- Colab fine-tuning
+- [x] Phase 1 -- Colab fine-tuning (`notebooks/phase1_finetune.ipynb`)
 - [ ] Phase 2 -- in-browser inference
 - [ ] Phase 3 -- tag-split chat UI
 
