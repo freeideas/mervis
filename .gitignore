@@ -1,5 +1,6 @@
 # scratch
 tmp/
+screenshots/
 
 # python
 __pycache__/
@@ -10,8 +11,13 @@ __pycache__/
 *.safetensors
 *.gguf
 *.onnx
+*.onnx_data
 checkpoints/
 merged_model/
+# weights pulled from Drive (verified copies)
+dl/
+# converted ONNX served to the browser
+web/model/
 
 # node / web build
 node_modules/

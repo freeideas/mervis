@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mervin &amp; Mervis</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <header>
+    <h1>Mervin &amp; Mervis 🤖💧🤖✨</h1>
+    <p class="sub">A two-headed robot, running entirely in your browser.</p>
+  </header>
+
+  <!-- Load gate: model download/compile happens here, once, then cached. -->
+  <div id="loader" class="loader">
+    <button id="load-btn">Load the robots <span class="dim">(downloads once, then cached)</span></button>
+    <div id="load-status" class="load-status" hidden>
+      <div class="bar"><div id="bar-fill" class="bar-fill"></div></div>
+      <div id="load-text" class="load-text">Starting…</div>
+    </div>
+    <p id="no-webgpu" class="warn" hidden>
+      This browser has no WebGPU (<code>navigator.gpu</code>). Use a recent Chrome or Edge.
+    </p>
+  </div>
+
+  <main id="chat" class="chat" hidden></main>
+
+  <!-- Generation controls (revealed once the model is live). -->
+  <div id="controls" class="controls" hidden>
+    <label>temp <input id="c-temp" type="range" min="0" max="1.5" step="0.05" value="0.7" />
+      <span id="c-temp-v">0.70</span></label>
+    <label>top_p <input id="c-topp" type="range" min="0.1" max="1" step="0.05" value="0.9" />
+      <span id="c-topp-v">0.90</span></label>
+    <label>max tok <input id="c-max" type="range" min="32" max="1024" step="32" value="512" />
+      <span id="c-max-v">512</span></label>
+    <label class="chk"><input id="c-raw" type="checkbox" /> show raw output</label>
+    <button id="reset-btn" type="button" class="ghost">Reset chat</button>
+  </div>
+
+  <form id="composer" class="composer" hidden>
+    <textarea id="input" rows="1" placeholder="Ask the robots something…" autocomplete="off"></textarea>
+    <button id="send" type="submit">Send</button>
+    <button id="stop" type="button" hidden>Stop</button>
+  </form>
+
+  <!-- Diagnostics: always available, collapsed by default. -->
+  <details id="diag" class="diag">
+    <summary>🔧 Diagnostics</summary>
+    <div class="diag-body">
+      <button id="diag-probe" type="button" class="ghost">Re-check WebGPU</button>
+      <dl id="diag-facts" class="diag-facts"></dl>
+      <pre id="diag-log" class="diag-log"></pre>
+    </div>
+  </details>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
