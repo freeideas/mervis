@@ -1,0 +1,22 @@
+# scratch
+tmp/
+
+# python
+__pycache__/
+*.pyc
+.venv/
+
+# model artifacts (too large for git; produced by phase 1/2)
+*.safetensors
+*.gguf
+*.onnx
+checkpoints/
+merged_model/
+
+# node / web build
+node_modules/
+web/dist/
+
+# os
+.DS_Store
+Thumbs.db
