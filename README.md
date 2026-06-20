@@ -89,11 +89,15 @@ Deliverable: the chat UI in `web/` rendering both personas side by side.
         both tags, stops on `<|end|>`
   - [x] Served via Caddy at https://ordinarydata.com/mervis/web/ + pre-compressed
         weights (zstd/gzip)
-  - [x] Shrunk under the 4 GB WASM ceiling: fp16'd the fp32 embedding table
-        (`scripts/shrink_embedding_fp16.py`), 4.86 GB -> ~3.63 GB
+  - [x] fp16'd the fp32 embedding table (`scripts/shrink_embedding_fp16.py`),
+        4.86 GB -> 3.63 GB
+  - [x] **Worked around V8's 2 GB single-ArrayBuffer cap**: split external data
+        into <2 GB shards (`scripts/split_external_data.py`, 1.70/1.70/0.23 GB) and
+        load via `session_options.externalData`; CPU sanity-gen still in character
   - [x] Added in-page diagnostics + controls (WebGPU/adapter info, load log,
         tok/s, temp/top_p/max-tokens, Stop, Reset, raw-output toggle)
-  - [~] Load/run in a real WebGPU browser *(driving it via Playwright + lavapipe)*
+  - [~] Load/run in a real WebGPU browser *(driving it via Playwright + lavapipe;
+        shard load fix in test)*
 - [~] Phase 3 -- tag-split chat UI
   - [x] Two-bubble UI + robot faces scaffolded (`web/`, `img/bot-{happy,sad}.png`)
   - [ ] Verified end-to-end in-browser against real model output
@@ -296,14 +300,33 @@ separate walls, in the order we hit them:
   and throws. (Transformers.js derives the sidecar name by appending `_data` to
   the model filename, so `model_q4.onnx` -> `model_q4.onnx_data` -- which is
   exactly what's on disk; the names must line up.)
-- **`Array buffer allocation failed` -- the 4 GB WASM ceiling (the big one).**
-  ONNX Runtime Web runs in a **32-bit WASM heap with a hard ~4 GB address-space
-  limit**, and it reads the *entire* model into that heap before handing tensors
-  to the WebGPU backend. Our `model_q4.onnx_data` was **4.86 GB**, so it could
-  never fit -- the load died right after the tiny graph file reported "ready,"
-  which looked like "loads instantly then send does nothing." **WebGPU does not
-  exempt you from the WASM memory limit during load.** Keep the whole model file
-  under ~4 GB (ideally well under, for arena/staging headroom).
+- **`Array buffer allocation failed` -- and the real ceiling is 2 GB, not 4 GB
+  (the big one).** First guess was the 32-bit WASM heap's ~4 GB address space, so
+  we shrank the model 4.86 GB -> 3.63 GB (embedding fp16, below). **It still
+  failed.** Probing the *actual* limits in this exact Chrome (149) settled it:
+  ```
+  new ArrayBuffer(2.0 GB)        -> ok
+  new ArrayBuffer(2.5 GB)        -> "Array buffer allocation failed"
+  new WebAssembly.Memory(4.0 GB) -> ok   (heap itself grows fine)
+  ```
+  The wall is **V8's ~2 GB cap on a single `ArrayBuffer`**, not the wasm heap. And
+  `use_external_data_format: true` fetches the whole `model_q4.onnx_data` into
+  **one** `Uint8Array` -- so any external-data file > 2 GB can never load, in
+  headless *or* real Chrome (same V8). This is why "loads instantly then send does
+  nothing": the tiny graph fetched, then the single big-buffer allocation threw.
+- **Fix: shard the external data into <2 GB files + load the explicit list.**
+  Transformers.js has a second, less-obvious path: instead of
+  `use_external_data_format`, pass
+  `session_options: { externalData: [{path, data}, ...] }`. It fetches **each**
+  entry as its *own* buffer (each < 2 GB) and ORT mounts them all into the wasm
+  heap (which happily holds the 3.63 GB total). `scripts/split_external_data.py`
+  bin-packs the initializers into shards (here: 1.70 + 1.70 + 0.23 GB), rewrites
+  each tensor's external-data `location`/`offset`, and emits
+  `external_data_manifest.json`; `web/app.js` fetches that manifest and builds the
+  `externalData` list. The `data` field is the fetch path
+  (`onnx/<shard>`); the `path` field must match the graph's `location` string
+  (`<shard>`). Caddy's existing `precompressed` glob serves `<shard>.zst/.gz` with
+  no config change.
 - **Why a 4-bit 3.8B model was still 4.86 GB: the embedding tax.** `MatMulNBits`
   4-bit quantization only touches `MatMul`s. The token-embedding table
   (`model.embed_tokens.weight`, **[200064, 3072]**) is consumed by a `Gather`, so
@@ -313,8 +336,9 @@ separate walls, in the order we hit them:
   one initializer* to fp16 (2.458 -> 1.23 GB) and inserts a `Cast(->FLOAT)` after
   its `Gather`, leaving the rest of the graph -- including the fp32 RMSNorm
   islands that broke full float16 conversion -- untouched. Result: **~3.63 GB**,
-  under the ceiling, fine-tune behavior unchanged. (Going to int8 there would
-  reach ~3.0 GB if more headroom is ever needed.)
+  fine-tune behavior unchanged. *This wasn't enough on its own* (see the 2 GB
+  ArrayBuffer cap above -- the real fix was sharding), but it cuts the download by
+  1.2 GB and keeps the shard count down. (int8 there would reach ~3.0 GB.)
 - **Headless Chrome has no WebGPU.** `navigator.gpu` is `undefined` in headless
   mode, even on Chrome 149 with every `--enable-unsafe-webgpu` flag. To drive the
   page from CI / a server with no GPU: run **headful under `xvfb-run`** with

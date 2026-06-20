@@ -132,13 +132,20 @@ async function loadModel() {
   try {
     logDiag("loading tokenizer…");
     tokenizer = await AutoTokenizer.from_pretrained(MODEL_ID);
-    logDiag("loading model (dtype=q4, device=webgpu, external data)…");
+
+    // The weights live in external-data shards, each kept < 2 GB because V8 caps
+    // a single ArrayBuffer at ~2 GB. We can't use `use_external_data_format:true`
+    // (it fetches ONE file into ONE buffer); instead we hand ORT the explicit
+    // shard list via session_options.externalData, which fetches each separately.
+    const manifest = await fetch("./model/onnx/external_data_manifest.json").then((r) => r.json());
+    logDiag(`external data: ${manifest.length} shard(s) — ${manifest.join(", ")}`);
+    const externalData = manifest.map((name) => ({ path: name, data: `onnx/${name}` }));
+
+    logDiag("loading model (dtype=q4, device=webgpu, sharded external data)…");
     model = await AutoModelForCausalLM.from_pretrained(MODEL_ID, {
       dtype: "q4",
       device: "webgpu",
-      // Weights live in model_q4.onnx_data (the .onnx is just the graph).
-      // Without this, ORT-web reports "Module.MountedFiles is not available".
-      use_external_data_format: true,
+      session_options: { externalData },
       progress_callback: onProgress,
     });
     logDiag(`model ready in ${((performance.now() - t0) / 1000).toFixed(1)} s`);
