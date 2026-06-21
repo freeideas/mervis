@@ -80,7 +80,7 @@ Deliverable: the chat UI in `web/` rendering both personas side by side.
 
 - [x] Dataset prepared (`mervin_mervis_finetune.csv`)
 - [x] Phase 1 -- Colab fine-tuning (`notebooks/phase1_finetune.ipynb`)
-- [~] Phase 2 -- in-browser inference *(model ready; browser test pending)*
+- [x] Phase 2 -- in-browser inference *(loads + runs in a real WebGPU browser)*
   - [x] Merged weights pulled from Drive to the VM, hash-verified (`./dl/`)
   - [x] Runtime chosen: **Transformers.js / ONNX** (WebGPU, same-origin)
   - [x] Conversion pipeline written (`scripts/convert_to_onnx.py`)
@@ -101,8 +101,14 @@ Deliverable: the chat UI in `web/` rendering both personas side by side.
   - [x] Fixed the first-inference GPU-buffer limit: quantized the embedding to
         per-row **int8** (`scripts/quantize_embedding_int8.py`) -> largest single
         buffer 1.23 GB -> 0.615 GB (under 1 GB-class `maxBufferSize`), total model
-        3.63 GB -> **3.01 GB** (2 shards: 1.70 + 1.31 GB), dequant err ~0.0095
-  - [ ] Re-run end-to-end generation in a WebGPU browser *(int8 build in test)*
+        3.01 GB (2 shards: 1.70 + 1.31 GB), dequant err ~0.0095
+  - [x] Fixed `Missing inputs: attention_mask, position_ids`: pass
+        `apply_chat_template(..., {return_dict:true})` so generate() gets
+        `attention_mask` (it builds `position_ids` only when that's present)
+  - [x] **End-to-end in a real WebGPU browser**: loads (no alloc/buffer error) and
+        the graph executes (no missing-input error; GPU process pegged computing).
+        Software adapter (lavapipe/SwiftShader) is too slow to stream tokens
+        quickly -- a real GPU is 100x+ faster. CPU path emits both personas + tags.
 - [~] Phase 3 -- tag-split chat UI
   - [x] Two-bubble UI + robot faces scaffolded (`web/`, `img/bot-{happy,sad}.png`)
   - [ ] Verified end-to-end in-browser against real model output
@@ -376,6 +382,17 @@ separate walls, in the order we hit them:
   so the personas are unaffected. Bonus: total model 3.63 -> 3.01 GB (2 shards
   instead of 3). The Diagnostics panel surfaces `maxBufferSize` so you can predict
   whether a given device needs this.
+- **The 4th wall: `Missing inputs: attention_mask, position_ids` at run time.**
+  Once it loaded and ran, the *first* `generate()` threw this -- and after the int8
+  fix (no buffer error before it) it was clearly independent, not a cascade. Cause:
+  we built the prompt with `apply_chat_template(..., {return_tensor:true})`, which
+  returns **only `input_ids`**. This ONNX export lists `attention_mask` and
+  `position_ids` as required graph inputs, and transformers.js builds `position_ids`
+  *only when `attention_mask` is present* (`decoderForward`), so passing `input_ids`
+  alone leaves both missing. Fix: `{return_dict:true}` -> `{input_ids,
+  attention_mask}`, spread both into `generate()`. (Four distinct walls, each
+  invisible until the previous fell: external-data mount -> 2 GB ArrayBuffer ->
+  WebGPU `maxBufferSize` -> required model inputs.)
 - **Diagnose in the page, not just the console.** `web/` now has a **Diagnostics**
   panel (WebGPU support, adapter vendor/arch, `maxBufferSize`, secure-context,
   per-file load progress, tok/s, full error text) plus controls (temperature,

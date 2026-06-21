@@ -259,9 +259,14 @@ async function generate(userText) {
   addUserBubble(userText);
   const update = addAssistantBubbles();
 
-  const input_ids = tokenizer.apply_chat_template(history, {
+  // return_dict gives { input_ids, attention_mask }. We need attention_mask:
+  // this ONNX export lists attention_mask + position_ids as required inputs, and
+  // transformers.js only builds position_ids when attention_mask is present.
+  // Passing input_ids alone -> ORT "Missing the following inputs: attention_mask,
+  // position_ids".
+  const inputs = tokenizer.apply_chat_template(history, {
     add_generation_prompt: true,
-    return_tensor: true,
+    return_dict: true,
   });
 
   let full = "";
@@ -283,7 +288,7 @@ async function generate(userText) {
   els.stop.hidden = false;
   try {
     await model.generate({
-      input_ids,
+      ...inputs,
       max_new_tokens: Number(els.cMax.value),
       do_sample: true,
       temperature: Number(els.cTemp.value),
