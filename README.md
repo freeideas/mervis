@@ -98,9 +98,11 @@ Deliverable: the chat UI in `web/` rendering both personas side by side.
         tok/s, temp/top_p/max-tokens, Stop, Reset, raw-output toggle)
   - [x] **Loads + creates a WebGPU session in a real browser** (verified via
         Playwright on a software adapter: `model ready in 1268 s`, no alloc error)
-  - [~] First inference: on a *software* adapter the 1.23 GB fp16 embedding needs a
-        single GPU buffer > its 1.07 GB `maxBufferSize` -> fails. Per-device; real
-        GPUs usually allow >=2 GB. Robust fix = int8 embedding (0.61 GB buffer).
+  - [x] Fixed the first-inference GPU-buffer limit: quantized the embedding to
+        per-row **int8** (`scripts/quantize_embedding_int8.py`) -> largest single
+        buffer 1.23 GB -> 0.615 GB (under 1 GB-class `maxBufferSize`), total model
+        3.63 GB -> **3.01 GB** (2 shards: 1.70 + 1.31 GB), dequant err ~0.0095
+  - [ ] Re-run end-to-end generation in a WebGPU browser *(int8 build in test)*
 - [~] Phase 3 -- tag-split chat UI
   - [x] Two-bubble UI + robot faces scaffolded (`web/`, `img/bot-{happy,sad}.png`)
   - [ ] Verified end-to-end in-browser against real model output
@@ -365,9 +367,15 @@ separate walls, in the order we hit them:
   *load* (fixed by sharding the file), and WebGPU's per-buffer `maxBufferSize` at
   *first run* (a property of the *single largest tensor*, not the file). This one
   is **per-device** -- many real desktop GPUs report `maxBufferSize` >= 2 GB and
-  sail through; software/low-end adapters cap lower. Robust fix: quantize the
-  embedding to int8 so its buffer is ~0.61 GB (under even the 1 GB-class limits).
-  The Diagnostics panel now surfaces `maxBufferSize` so you can predict this.
+  sail through; software/low-end adapters cap lower. **Fix (done):**
+  `scripts/quantize_embedding_int8.py` quantizes the embedding to **per-row int8**
+  (symmetric, scale per token row), so its buffer drops to ~0.615 GB -- under even
+  1 GB-class limits. The graph rewrite is `Gather(int8) -> Cast(fp32)` multiplied
+  by `Gather(scale)` (scale shaped `[V,1]` so it broadcasts over the hidden dim,
+  no Unsqueeze). Max abs dequant error ~0.0095 -- embeddings tolerate int8 well,
+  so the personas are unaffected. Bonus: total model 3.63 -> 3.01 GB (2 shards
+  instead of 3). The Diagnostics panel surfaces `maxBufferSize` so you can predict
+  whether a given device needs this.
 - **Diagnose in the page, not just the console.** `web/` now has a **Diagnostics**
   panel (WebGPU support, adapter vendor/arch, `maxBufferSize`, secure-context,
   per-file load progress, tok/s, full error text) plus controls (temperature,
