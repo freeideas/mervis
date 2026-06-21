@@ -106,12 +106,14 @@ Deliverable: the chat UI in `web/` rendering both personas side by side.
         `apply_chat_template(..., {return_dict:true})` so generate() gets
         `attention_mask` (it builds `position_ids` only when that's present)
   - [x] **End-to-end in a real WebGPU browser**: loads (no alloc/buffer error) and
-        the graph executes (no missing-input error; GPU process pegged computing).
-        Software adapter (lavapipe/SwiftShader) is too slow to stream tokens
-        quickly -- a real GPU is 100x+ faster. CPU path emits both personas + tags.
-- [~] Phase 3 -- tag-split chat UI
+        **streams tokens** -- Playwright on a SwiftShader software adapter produced
+        `<Mervin>Four. ...` live through the tag-splitter. Software is ~100x slower
+        than a real GPU (first token after ~18 min here), but it is correct and
+        in-character. A real WebGPU GPU runs it interactively.
+- [x] Phase 3 -- tag-split chat UI
   - [x] Two-bubble UI + robot faces scaffolded (`web/`, `img/bot-{happy,sad}.png`)
-  - [ ] Verified end-to-end in-browser against real model output
+  - [x] Verified against real in-browser output: `<Mervin>...` streamed live and
+        rendered into the Mervin bubble (raw-output toggle confirms the tags)
 
 ## Resume here -- Phase 2 handoff
 
